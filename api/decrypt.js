@@ -27,7 +27,7 @@ export default function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ status: "error", message: "Method Not Allowed" });
 
     // ==========================================
-    // APKI SECURE MASTER KEY (Sirf Server Par)
+    // APKI SECURE MASTER KEY
     // ==========================================
     const REAL_MASTER_KEY = "Yasir123";
 
@@ -48,19 +48,43 @@ export default function handler(req, res) {
         }
 
         // ----------------------------------------------------
-        // ACTION 2: AUTORUN (Only used for executing HTML silently)
+        // ACTION 2: AUTORUN (Anti-Bot & Anti-Replay System)
         // ----------------------------------------------------
         else if (action === 'autorun') {
-            const { encrypted_code, server_token } = req.body;
-            if (!encrypted_code || !server_token) return res.status(400).json({ status: "error", message: "Missing payload or token." });
+            const { encrypted_code, server_token, timestamp, browser_fingerprint } = req.body;
+
+            // 1. HARDCORE SECURITY: User Agent Check (Block bots & scripts)
+            const ua = req.headers['user-agent'] || '';
+            if (ua.includes('Postman') || ua.includes('curl') || ua.includes('python') || ua.includes('node') || ua === '') {
+                return res.status(403).json({ status: "error", message: "Security Alert: Bot or Script Detected. Access Denied." });
+            }
+
+            // 2. HARDCORE SECURITY: Time-Based Verification (TOTP)
+            // Agar request 30 seconds se purani hai, toh ye Replay Attack hai!
+            const currentTime = Date.now();
+            if (!timestamp || Math.abs(currentTime - timestamp) > 30000) {
+                return res.status(403).json({ status: "error", message: "Security Alert: Request Expired. Replay Attack Blocked." });
+            }
+
+            // 3. HARDCORE SECURITY: Browser Fingerprint Validation
+            if (!browser_fingerprint || browser_fingerprint.length < 10) {
+                return res.status(403).json({ status: "error", message: "Security Alert: Invalid Browser Environment." });
+            }
+
+            if (!encrypted_code || !server_token) {
+                return res.status(400).json({ status: "error", message: "Missing payload or token." });
+            }
 
             let decryptedCode = null;
             let extracted_access_key = null;
+            
+            // Decrypt Server Token
             try {
                 const tokenBytes = CryptoJS.AES.decrypt(server_token, REAL_MASTER_KEY);
                 extracted_access_key = tokenBytes.toString(CryptoJS.enc.Utf8);
             } catch (e) { return res.status(401).json({ status: "error", message: "Invalid Token." }); }
 
+            // Decrypt Original Code
             try {
                 const codeBytes = CryptoJS.AES.decrypt(encrypted_code, extracted_access_key, { format: CryptoJSAesJson });
                 const result = codeBytes.toString(CryptoJS.enc.Utf8);
@@ -75,29 +99,6 @@ export default function handler(req, res) {
             }
         } 
         
-        // ----------------------------------------------------
-        // ACTION 3: EXTRACT MASTER (Validates Master Key for Extraction UI)
-        // ----------------------------------------------------
-        else if (action === 'extract_master') {
-            const { encrypted_code, server_token, user_key } = req.body;
-            
-            // Check if user provided the exact Master Key
-            if (user_key === REAL_MASTER_KEY) {
-                try {
-                    const tokenBytes = CryptoJS.AES.decrypt(server_token, REAL_MASTER_KEY);
-                    const extracted_access_key = tokenBytes.toString(CryptoJS.enc.Utf8);
-
-                    const codeBytes = CryptoJS.AES.decrypt(encrypted_code, extracted_access_key, { format: CryptoJSAesJson });
-                    const result = codeBytes.toString(CryptoJS.enc.Utf8);
-                    
-                    if (result) {
-                        const base64Encoded = Buffer.from(JSON.parse(result)).toString('base64');
-                        return res.status(200).json({ status: "success", decrypted_code: base64Encoded });
-                    }
-                } catch (e) {}
-            }
-            return res.status(401).json({ status: "error", message: "Access Denied: Invalid Master Key." });
-        }
         else {
             return res.status(400).json({ status: "error", message: "Invalid action." });
         }
